@@ -1,53 +1,53 @@
 package main
 
 import (
-	"log"
-	"net"
 	"bufio"
 	"fmt"
-	"strconv"
-	"strings"
-	"os"
 	"io"
 	"io/ioutil"
+	"log"
+	"net"
+	"os"
 	"path"
+	"strconv"
+	"strings"
 )
 
 type ftpSession struct {
-	pwd string
-	conn net.Conn
-	dataHost string
+	pwd          string
+	conn         net.Conn
+	dataHost     string
 	pasvListener net.Listener
-	binary bool
-	isPassive bool
+	binary       bool
+	isPassive    bool
 }
 
-func newFtpSession (conn net.Conn) *ftpSession {
-	pwd, err:=os.Getwd()
+func newFtpSession(conn net.Conn) *ftpSession {
+	pwd, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	return &ftpSession{
 		conn: conn,
-		pwd: pwd,
+		pwd:  pwd,
 	}
 }
 
-// func (ftp *ftpSession) 
+// func (ftp *ftpSession)
 
-func ftpHostNormalize(ftpHost string) (addr string,err error){
-	var a,b,c,d byte
-	var p1,p2 int
+func ftpHostNormalize(ftpHost string) (addr string, err error) {
+	var a, b, c, d byte
+	var p1, p2 int
 	_, err = fmt.Sscanf(ftpHost, "%d,%d,%d,%d,%d,%d", &a, &b, &c, &d, &p1, &p2)
 	if err != nil {
 		return "", err
 	}
-	ip := fmt.Sprintf("%d.%d.%d.%d:%d", a,b,c,d,p1<<8+p2)
+	ip := fmt.Sprintf("%d.%d.%d.%d:%d", a, b, c, d, p1<<8+p2)
 	return ip, err
 }
 
-func hostToFtpHost(addr string)(ftpHost string, err error) {
+func hostToFtpHost(addr string) (ftpHost string, err error) {
 	host, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
 		return "", err
@@ -60,7 +60,7 @@ func hostToFtpHost(addr string)(ftpHost string, err error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	return fmt.Sprintf("%s:%d", ip.IP.To4(), port), nil
 }
 
@@ -91,15 +91,15 @@ func (ftp *ftpSession) port(args []string) {
 	ftp.writeln("200 PORT success")
 }
 
-func (ftp *ftpSession) typeCmd (args []string) {
-	if (len(args)<2 || len(args)>3) {
+func (ftp *ftpSession) typeCmd(args []string) {
+	if len(args) < 2 || len(args) > 3 {
 		ftp.writeln("500 Usage: TYPE A")
 	}
 	arg := strings.Join(args, " ")
 	switch arg {
 	case "A", "A N":
 		ftp.binary = false
-	
+
 	case "I", "L 8":
 		ftp.binary = true
 	default:
@@ -159,8 +159,8 @@ func (ftp *ftpSession) pasv() {
 		return
 	}
 	var ftpHost string
-	ftpHost, err = hostToFtpHost(fmt.Sprintf("%s:%s",ip, portStr))
-	if err !=nil {
+	ftpHost, err = hostToFtpHost(fmt.Sprintf("%s:%s", ip, portStr))
+	if err != nil {
 		ftp.writeln("421 Listner error.")
 		return
 	}
@@ -200,7 +200,7 @@ func (ftp *ftpSession) retr(filePath string) {
 		}
 		defer c.Close()
 	}
-	
+
 	ftp.writeln("125 Data connection already open; transfer starting")
 	_, err = io.Copy(c, f)
 	if err != nil {
@@ -221,7 +221,7 @@ func (ftp *ftpSession) stor(filePath string) {
 		}
 		defer c.Close()
 	} else {
-		c, err = net.Dial("tcp4",ftp.dataHost)
+		c, err = net.Dial("tcp4", ftp.dataHost)
 		if err != nil {
 			log.Fatal(err)
 			ftp.writeln("425 Can't open data connection")
@@ -229,7 +229,7 @@ func (ftp *ftpSession) stor(filePath string) {
 		}
 		defer c.Close()
 	}
-	
+
 	ftp.writeln("125 Data connection already open; transfer starting")
 	file, err := ioutil.ReadAll(c)
 	if err != nil {
@@ -239,7 +239,7 @@ func (ftp *ftpSession) stor(filePath string) {
 	}
 	filePath = path.Join(ftp.pwd, filePath)
 	var saveFile *os.File
-	
+
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		os.MkdirAll(filePath, 0700)
 		saveFile, err = os.Create(filePath)
@@ -271,16 +271,15 @@ func main() {
 	}
 }
 
-
 func handleConn(c net.Conn) {
 	session := newFtpSession(c)
 	session.writeln("220 Service ready")
 	input := bufio.NewScanner(c)
 	for input.Scan() {
 		text := input.Text()
-		fmt.Println("*: ",text)
+		fmt.Println("*: ", text)
 		cuts := strings.Fields(text)
-		if(len(cuts) <= 0) {
+		if len(cuts) <= 0 {
 			continue
 		}
 		cmd := strings.ToUpper(cuts[0])
@@ -297,7 +296,7 @@ func handleConn(c net.Conn) {
 		case "STRU":
 			session.stru(args)
 		case "PASV":
-				session.pasv()
+			session.pasv()
 		case "PORT":
 			session.port(args)
 		case "RETR":
