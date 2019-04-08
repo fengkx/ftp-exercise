@@ -60,8 +60,8 @@ func hostToFtpHost(addr string) (ftpHost string, err error) {
 	if err != nil {
 		return "", err
 	}
-
-	return fmt.Sprintf("%s:%d", ip.IP.To4(), port), nil
+	ipBytes := ip.IP.To4()
+	return fmt.Sprintf("%d,%d,%d,%d,%d,%d", ipBytes[0], ipBytes[1], ipBytes[2], ipBytes[3], port>>8, port%256), nil
 }
 
 func (ftp *ftpSession) writeln(msg string) {
