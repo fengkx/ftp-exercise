@@ -8,9 +8,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type ftpSession struct {
@@ -34,8 +36,7 @@ func newFtpSession(conn net.Conn) *ftpSession {
 	}
 }
 
-// func (ftp *ftpSession)
-
+// normalize to RFC format
 func ftpHostNormalize(ftpHost string) (addr string, err error) {
 	var a, b, c, d byte
 	var p1, p2 int
@@ -47,6 +48,7 @@ func ftpHostNormalize(ftpHost string) (addr string, err error) {
 	return ip, err
 }
 
+// convert from the format in RFC
 func hostToFtpHost(addr string) (ftpHost string, err error) {
 	host, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -62,6 +64,13 @@ func hostToFtpHost(addr string) (ftpHost string, err error) {
 	}
 	ipBytes := ip.IP.To4()
 	return fmt.Sprintf("%d,%d,%d,%d,%d,%d", ipBytes[0], ipBytes[1], ipBytes[2], ipBytes[3], port>>8, port%256), nil
+}
+
+func getActualPath(pwd string, dirPath string) string {
+	if !path.IsAbs(dirPath) {
+		return path.Join(pwd, dirPath)
+	}
+	return dirPath
 }
 
 func (ftp *ftpSession) writeln(msg string) {
@@ -92,7 +101,8 @@ func (ftp *ftpSession) port(args []string) {
 }
 
 func (ftp *ftpSession) typeCmd(args []string) {
-	if len(args) < 2 || len(args) > 3 {
+	fmt.Println(args, len(args))
+	if len(args) < 1 || len(args) > 2 {
 		ftp.writeln("500 Usage: TYPE A")
 	}
 	arg := strings.Join(args, " ")
@@ -241,7 +251,6 @@ func (ftp *ftpSession) stor(filePath string) {
 	var saveFile *os.File
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		os.MkdirAll(filePath, 0700)
 		saveFile, err = os.Create(filePath)
 	}
 	if err != nil {
@@ -249,10 +258,78 @@ func (ftp *ftpSession) stor(filePath string) {
 		ftp.writeln("450 File transfer error")
 		return
 	}
-	log.Println(filePath)
 	saveFile.Write(file)
 	saveFile.Close()
+	tf, _ := os.Stat(filePath)
+	sz := strconv.FormatInt(tf.Size(), 10)
+	log.Println(filePath + " [" + sz + "]" + "bytes")
 	ftp.writeln("226 file transfer")
+}
+
+func (ftp *ftpSession) pwdCmd(args []string) {
+	if len(args) != 0 {
+		ftp.writeln("501 Syntax Error of argument")
+		return
+	}
+	ftp.writeln("257 " + "\"" + ftp.pwd + "\"" + " is current directory")
+}
+
+func (ftp *ftpSession) cwdCmd(dirPath string) {
+	dirPath = getActualPath(ftp.pwd, dirPath)
+	_, err := os.Stat(dirPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			ftp.writeln("550 File Not found")
+		}
+		ftp.writeln("550 File Not accessable")
+		return
+	}
+	ftp.pwd = dirPath
+	ftp.writeln("250 directory changed to \"" + ftp.pwd + "\"")
+}
+
+func (ftp *ftpSession) list(args []string) {
+	var p string
+	if len(args) == 0 {
+		p = ftp.pwd
+	} else {
+		p = path.Join(ftp.pwd, args[1])
+	}
+	var c io.ReadWriteCloser
+	var err error
+	if ftp.isPassive {
+		c, err = ftp.pasvListener.Accept()
+		if err != nil {
+			ftp.writeln("425 Can't open data connection")
+			return
+		}
+		defer c.Close()
+	} else {
+		c, err = net.Dial("tcp4", ftp.dataHost)
+		if err != nil {
+			log.Fatal(err)
+			ftp.writeln("425 Can't open data connection")
+			return
+		}
+		defer c.Close()
+	}
+
+	ftp.writeln("150 start sending file list data")
+
+	cmd := exec.Command("ls", "-la", p)
+	out, err := cmd.Output()
+	if err != nil {
+		ftp.writeln("450 file system error")
+		fmt.Println(err)
+		return
+	}
+	d := string(out)
+	lines := strings.Split(d, "\n")
+	d = strings.Join(lines, "\r\n")
+	c.Write([]byte(d))
+	ftp.writeln("226 Transfer completed")
+	c.Close()
+	time.Sleep(1)
 }
 
 func main() {
@@ -305,6 +382,12 @@ func handleConn(c net.Conn) {
 			session.stor(args[0])
 		case "NOOP":
 			session.writeln("200 Okay")
+		case "PWD":
+			session.pwdCmd(args)
+		case "CWD":
+			session.cwdCmd(args[0])
+		case "LIST":
+			session.list(args)
 		default:
 			session.writeln("502 command not support")
 		}
